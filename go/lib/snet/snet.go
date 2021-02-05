@@ -44,6 +44,7 @@ package snet
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	"github.com/scionproto/scion/go/lib/addr"
@@ -91,7 +92,22 @@ func (n *SCIONNetwork) Dial(ctx context.Context, network string, listen *net.UDP
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	conn, err := n.Listen(ctx, network, listen, svc)
+	conn, err := n.ListenUDP(ctx, network, listen, svc)
+	if err != nil {
+		return nil, err
+	}
+	conn.remote = remote.Copy()
+	return conn, nil
+}
+
+func (n *SCIONNetwork) DialUDP(ctx context.Context, network string, listen *net.UDPAddr,
+	remote *UDPAddr, svc addr.HostSVC) (*Conn, error) {
+
+	metrics.M.Dials().Inc()
+	if remote == nil {
+		return nil, serrors.New("Unable to dial to nil remote")
+	}
+	conn, err := n.ListenUDP(ctx, network, listen, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -147,4 +163,73 @@ func (n *SCIONNetwork) Listen(ctx context.Context, network string, listen *net.U
 	}
 	log.Debug("Registered with dispatcher", "addr", &UDPAddr{IA: n.LocalIA, Host: conn.listen})
 	return newConn(conn, packetConn), nil
+}
+
+// Listen registers listen with the dispatcher. Nil values for listen are
+// not supported yet. The returned connection's ReadFrom and WriteTo methods
+// can be used to receive and send SCION packets with per-packet addressing.
+// Parameter network must be "udp".
+//
+// The context is used for connection setup, it doesn't affect the returned
+// connection.
+func (n *SCIONNetwork) ListenUDP(ctx context.Context, network string, listen *net.UDPAddr,
+	svc addr.HostSVC) (*Conn, error) {
+
+	metrics.M.Listens().Inc()
+
+	if network != "udp" {
+		return nil, serrors.New("Unknown network", "network", network)
+	}
+
+	// FIXME(scrye): If no local address is specified, we want to
+	// bind to the address of the outbound interface on a random
+	// free port. However, the current dispatcher version cannot
+	// expose that address. Additionally, the dispatcher does not follow
+	// normal operating system semantics for binding on 0.0.0.0 (it
+	// considers it to be a fixed address instead of a wildcard). To avoid
+	// misuse, disallow binding to nil or 0.0.0.0 addresses for now.
+	if listen == nil {
+		return nil, serrors.New("nil listen addr not supported")
+	}
+	if listen.IP == nil {
+		return nil, serrors.New("nil listen IP not supported")
+	}
+	if listen.IP.IsUnspecified() {
+		return nil, serrors.New("unspecified listen IP not supported")
+	}
+	conn := &scionConnBase{
+		net:      network,
+		scionNet: n,
+		svc:      svc,
+		listen:   CopyUDPAddr(listen),
+	}
+
+	// Create "normal" UDP listen socket instead of registering with dispatcher
+	// packetConn, port, err := conn.scionNet.Dispatcher.Register(ctx, n.LocalIA, listen, svc)
+	packetConn, err := net.ListenPacket("udp", listen.String())
+	fmt.Printf("Listen SCION on %s, err %v\n", listen.String(), err)
+	if err != nil {
+		return nil, err
+	}
+	if listen.Port != conn.listen.Port {
+		// Update port
+		conn.listen.Port = int(listen.Port)
+	}
+	sPacketConn := NewSCIONPacketConn(packetConn, nil, true)
+
+	/*
+		buffer := make([]byte, 1000)
+		a, _ := packetConn.WriteTo(buffer, net.Addr(listen))
+		fmt.Printf("Write %d to packetConn\n", a)
+		time.Sleep(5 * time.Second)
+		go func() {
+			buffer := make([]byte, 1000)
+			n, _, _ := packetConn.ReadFrom(buffer)
+			fmt.Printf("Read %d from packetconn\n", n)
+		}()
+	*/
+
+	log.Debug("Registered with udp", "addr", &UDPAddr{IA: n.LocalIA, Host: conn.listen})
+	fmt.Printf("Registered with udp %s\n", conn.listen.String())
+	return newConn(conn, sPacketConn), nil
 }
