@@ -19,6 +19,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -99,7 +100,8 @@ type SCIONPacketConn struct {
 	// scmpHandler is invoked for packets that contain an SCMP L4. If the
 	// handler is nil, errors are returned back to applications every time an
 	// SCMP message is received.
-	scmpHandler SCMPHandler
+	scmpHandler  SCMPHandler
+	cachedLayers []gopacket.SerializableLayer
 }
 
 // NewSCIONPacketConn creates a new conn with packet serialization/decoding
@@ -123,8 +125,28 @@ func (c *SCIONPacketConn) Close() error {
 }
 
 func (c *SCIONPacketConn) WriteTo(pkt *Packet, ov *net.UDPAddr) error {
-	if err := pkt.Serialize(); err != nil {
-		return serrors.WrapStr("serialize SCION packet", err)
+	// PERFCHANGE
+	if c.cachedLayers == nil {
+		layers, err := pkt.Serialize()
+		c.cachedLayers = layers
+		if err != nil {
+			return serrors.WrapStr("serialize SCION packet", err)
+		}
+	} else {
+		packetLayers := c.cachedLayers[:len(c.cachedLayers)-1]
+		udpPayload := pkt.Payload.(UDPPayload)
+		packetLayers = append(packetLayers, gopacket.Payload(udpPayload.Payload))
+
+		buffer := gopacket.NewSerializeBuffer()
+		options := gopacket.SerializeOptions{
+			ComputeChecksums: true,
+			FixLengths:       true,
+		}
+		if err := gopacket.SerializeLayers(buffer, options, packetLayers...); err != nil {
+			return err
+		}
+		copy(pkt.Bytes, buffer.Bytes())
+		pkt.Bytes = pkt.Bytes[:len(buffer.Bytes())]
 	}
 
 	// Send message
@@ -134,6 +156,7 @@ func (c *SCIONPacketConn) WriteTo(pkt *Packet, ov *net.UDPAddr) error {
 	}
 	metrics.M.WriteBytes().Add(float64(n))
 	metrics.M.WritePackets().Inc()
+
 	return nil
 }
 

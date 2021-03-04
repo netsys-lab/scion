@@ -412,10 +412,10 @@ func (p *Packet) Decode() error {
 }
 
 // Serialize serializes the PacketInfo into the raw buffer of the packet.
-func (p *Packet) Serialize() error {
+func (p *Packet) Serialize() ([]gopacket.SerializableLayer, error) {
 	p.Prepare()
 	if p.Payload == nil {
-		return serrors.New("no payload set")
+		return nil, serrors.New("no payload set")
 	}
 	var packetLayers []gopacket.SerializableLayer
 
@@ -432,35 +432,35 @@ func (p *Packet) Serialize() error {
 	scionLayer.SrcIA = p.Source.IA
 	netDstAddr, err := hostAddrToNetAddr(p.Destination.Host)
 	if err != nil {
-		return serrors.WrapStr("converting destination addr.HostAddr to net.Addr", err,
+		return nil, serrors.WrapStr("converting destination addr.HostAddr to net.Addr", err,
 			"address", p.Destination.Host)
 	}
 	if err := scionLayer.SetDstAddr(netDstAddr); err != nil {
-		return serrors.WrapStr("setting destination address", err)
+		return nil, serrors.WrapStr("setting destination address", err)
 	}
 	netSrcAddr, err := hostAddrToNetAddr(p.Source.Host)
 	if err != nil {
-		return serrors.WrapStr("converting source addr.HostAddr to net.Addr", err,
+		return nil, serrors.WrapStr("converting source addr.HostAddr to net.Addr", err,
 			"address", p.Source.Host)
 	}
 	if err := scionLayer.SetSrcAddr(netSrcAddr); err != nil {
-		return serrors.WrapStr("settting source address", err)
+		return nil, serrors.WrapStr("settting source address", err)
 	}
 
 	scionLayer.PathType = p.Path.Type
 	scionLayer.Path, err = path.NewPath(p.Path.Type)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err = scionLayer.Path.DecodeFromBytes(p.Path.Raw); err != nil {
-		return serrors.WrapStr("decoding path", err)
+		return nil, serrors.WrapStr("decoding path", err)
 	}
 	// XXX this is for convenience when debugging with delve
 	if p.Path.Type == scion.PathType {
 		sp := scionLayer.Path.(*scion.Raw)
 		scionLayer.Path, err = sp.ToDecoded()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -473,11 +473,11 @@ func (p *Packet) Serialize() error {
 		FixLengths:       true,
 	}
 	if err := gopacket.SerializeLayers(buffer, options, packetLayers...); err != nil {
-		return err
+		return nil, err
 	}
 	copy(p.Bytes, buffer.Bytes())
 	p.Bytes = p.Bytes[:len(buffer.Bytes())]
-	return nil
+	return packetLayers, nil
 }
 
 // PacketInfo contains the data needed to construct a SCION packet.

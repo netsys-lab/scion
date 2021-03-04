@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gammazero/workerpool"
 	"github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -34,6 +35,7 @@ type scionConnWriter struct {
 
 	mtx    sync.Mutex
 	buffer common.RawBytes
+	wp     *workerpool.WorkerPool
 }
 
 func newScionConnWriter(base *scionConnBase, conn PacketConn) *scionConnWriter {
@@ -42,6 +44,7 @@ func newScionConnWriter(base *scionConnBase, conn PacketConn) *scionConnWriter {
 		base:   base,
 		conn:   conn,
 		buffer: make(common.RawBytes, common.MaxMTU),
+		wp:     workerpool.New(32),
 	}
 }
 
@@ -78,7 +81,7 @@ func (c *scionConnWriter) WriteTo(b []byte, raddr net.Addr) (int, error) {
 	}
 
 	pkt := &Packet{
-		Bytes: Bytes(c.buffer),
+		Bytes: Bytes(c.buffer), // PERFCHANGE
 		PacketInfo: PacketInfo{
 			Destination: dst,
 			Source: SCIONAddress{IA: c.base.scionNet.LocalIA,
@@ -92,11 +95,13 @@ func (c *scionConnWriter) WriteTo(b []byte, raddr net.Addr) (int, error) {
 		},
 	}
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	// PERFCHANGE: Remove mutex
+	// c.mtx.Lock()
+	// defer c.mtx.Unlock()
 	if err := c.conn.WriteTo(pkt, nextHop); err != nil {
-		return 0, err
+		// return 0, err
 	}
+
 	return len(b), nil
 }
 

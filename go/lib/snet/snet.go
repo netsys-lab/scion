@@ -92,7 +92,7 @@ func (n *SCIONNetwork) Dial(ctx context.Context, network string, listen *net.UDP
 	if remote == nil {
 		return nil, serrors.New("Unable to dial to nil remote")
 	}
-	conn, err := n.ListenUDP(ctx, network, listen, svc)
+	conn, err := n.Listen(ctx, network, listen, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (n *SCIONNetwork) ListenUDP(ctx context.Context, network string, listen *ne
 	// Create "normal" UDP listen socket instead of registering with dispatcher
 	// packetConn, port, err := conn.scionNet.Dispatcher.Register(ctx, n.LocalIA, listen, svc)
 	packetConn, err := net.ListenPacket("udp", listen.String())
-	fmt.Printf("Listen SCION on %s, err %v\n", listen.String(), err)
+	fmt.Printf("Listen SCION on %s, port %d, err %v\n", listen.String(), conn.listen.Port, err)
 	if err != nil {
 		return nil, err
 	}
