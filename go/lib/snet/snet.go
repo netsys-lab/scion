@@ -44,7 +44,6 @@ package snet
 
 import (
 	"context"
-	"fmt"
 	"net"
 
 	"github.com/scionproto/scion/go/lib/addr"
@@ -207,7 +206,6 @@ func (n *SCIONNetwork) ListenUDP(ctx context.Context, network string, listen *ne
 	// Create "normal" UDP listen socket instead of registering with dispatcher
 	// packetConn, port, err := conn.scionNet.Dispatcher.Register(ctx, n.LocalIA, listen, svc)
 	packetConn, err := net.ListenPacket("udp", listen.String())
-	fmt.Printf("Listen SCION on %s, port %d, err %v\n", listen.String(), conn.listen.Port, err)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +228,5 @@ func (n *SCIONNetwork) ListenUDP(ctx context.Context, network string, listen *ne
 	*/
 
 	log.Debug("Registered with udp", "addr", &UDPAddr{IA: n.LocalIA, Host: conn.listen})
-	fmt.Printf("Registered with udp %s\n", conn.listen.String())
 	return newConn(conn, sPacketConn), nil
 }
